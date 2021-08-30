@@ -1,0 +1,13 @@
+## UDA Ignore File ##
+
+# data and repositories
+data/
+utils/
+pretrained_models/
+
+# notes
+REPO.py
+
+# extentions
+requirements.txt
+.venv
