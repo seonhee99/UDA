@@ -2,7 +2,7 @@
 
 # data and repositories
 data/
-utils/
+# utils/
 pretrained_models/
 
 # notes
