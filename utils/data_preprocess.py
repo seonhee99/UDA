@@ -119,8 +119,9 @@ class UDADataset(Dataset):
         return len(self.text)
     
     def __getitem__(self, idx):
+        # from IPython import embed; embed()
         text = torch.tensor( ast.literal_eval(self.text[idx]) , dtype=torch.long)
         aug_text = torch.tensor( ast.literal_eval(self.aug[idx]) , dtype=torch.long)
-        label = torch.tensor( ast.literal_eval(self.label[idx]) , dtype=torch.long)
+        label = torch.tensor( self.label[idx] , dtype=torch.long)
         return text, aug_text, label
     

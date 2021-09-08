@@ -72,9 +72,20 @@ def main():
     test_dataset = dp.UDADataset(test)
     unlabeled_dataset = dp.UDADataset(unlabeled)
 
-    train_loader = DataLoader(train_dataset)
-    test_loader = DataLoader(test_dataset)
-    unlabeled_loader = DataLoader(unlabeled_dataset)
+    data_collator = default_data_collator
+    train_loader = DataLoader(train_dataset,
+                            #   collate_fn=data_collator,
+                              batch_size=training_args.batch_size
+                              )
+    test_loader  = DataLoader(test_dataset,
+                            #   collate_fn=data_collator,
+                              batch_size=training_args.batch_size
+                              )
+    unlabeled_loader = DataLoader(unlabeled_dataset,
+                                #   collate_fn=data_collator,
+                                  batch_size=training_args.batch_size
+                                  )
+    unlabeled_loader = iter(unlabeled_loader)
 
     accelerator = Accelerator()
     logger.info(accelerator.state)
@@ -103,21 +114,42 @@ def main():
 
     
     lr_scheduler = transformers.get_linear_schedule_with_warmup(
-        optimizer = optimizer
+        optimizer = optimizer,
         num_warmup_steps=training_args.num_warmup_steps,
-        num_training_steps=training_args.num_training_steps,
+        num_training_steps=training_args.num_train_steps,
     )
     metric = load_metric('accuracy')
     # progress_bar = tqdm(range(training_args.max_train_steps), disable=not accelerator.is_local_main_process)
     completed_steps = 0
+    CE_loss = torch.nn.CrossEntropyLoss(reduction="none")
+    KL_loss = torch.nn.KLDivLoss(reduction='batchmean')
+
 
     logging.info('\t*** Running training & eval ***')
     for epoch in range(training_args.num_train_epochs):
         model.train()
-        for step, batch in enumerate(train_loader):
-            outputs = model(**batch)
-            loss = output.loss
-            loss /= training_args.gradient_accumulation_steps
+        for step, batch in enumerate(train_dataloader):
+            # supervised learning
+            # cross entropy
+            text, _, label = batch
+            outputs = model(text)
+            cross_entropy_loss = CE_loss(outputs[0], label)
+            supervised_loss = output.loss
+            supervised_loss /= training_args.gradient_accumulation_steps
+
+            # unsupervised learning
+            # consistency loss
+            ori_text, aug_text, _ = next(unlabeled_loader)
+            output_aug = model(aug_text)[0]
+            with torch.no_grad():
+                output_ori = model(ori_text)[0]
+            
+            consistency_loss = KL_loss(output_ori, output_aug)
+
+            # final loss
+            loss = supervised_loss + consistency_loss
+            # mean? # scaling? # softmax?
+
             accelerator.backward(loss)
             if step % args.gradient_accumulation_steps == 0 or step == len(train_dataloader) - 1:
                 optimizer.step()
@@ -140,17 +172,6 @@ def main():
 
         eval_metric = metric.compute()
         logger.info(f"epoch {epoch}: {eval_metric}")
-
-    ## 하단 : Trainer 기준 코드 (수정필요)
-    if training_args.do_train and training_args.do_eval:
-        best_acc = 0
-        for _ in range(0, training_args.num_train_steps, save_checkpoints_steps):
-            trainer.train(train_input_fn, step)
-            dev_res = trainer.evaluate(eval_fn, eval_step)
-            for k in dev_res.keys():
-                print(f"\t{k} : {dev_res[k]}")
-                dev_res[k] = dev[k].item()
-
 
 if __name__ == '__main__':
     main()

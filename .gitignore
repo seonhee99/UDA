@@ -2,7 +2,7 @@
 
 # data and repositories
 data/
-# utils/
+utils/__pycache__/
 pretrained_models/
 
 # notes

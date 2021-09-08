@@ -10,6 +10,7 @@ class TrainingConfig():
         self.data = 'uda'
         self.do_train = True
         self.do_eval = True
+        self.batch_size = 8
         self.weight_decay = 0.1
         self.learning_rate = 0.1
         self.num_train_steps=1000
