@@ -60,31 +60,16 @@ def main():
 
     ## TODO : training까지
     logger.info('\tTRAIN')
-    # training_args = TrainingArguments("test_trainer")
-    # trainer = Trainer(
-    #     model=model,
-    #     args=training_args,
-    #     train_dataset=train_dataset,
-    #     eval_dataset=test_dataset,
-    # )
 
     train_dataset = dp.UDADataset(train)
     test_dataset = dp.UDADataset(test)
     unlabeled_dataset = dp.UDADataset(unlabeled)
 
     data_collator = default_data_collator
-    train_loader = DataLoader(train_dataset,
-                            #   collate_fn=data_collator,
-                              batch_size=training_args.batch_size
-                              )
-    test_loader  = DataLoader(test_dataset,
-                            #   collate_fn=data_collator,
-                              batch_size=training_args.batch_size
-                              )
-    unlabeled_loader = DataLoader(unlabeled_dataset,
-                                #   collate_fn=data_collator,
-                                  batch_size=training_args.batch_size
-                                  )
+    train_loader = DataLoader(train_dataset, batch_size=training_args.batch_size)
+    test_loader  = DataLoader(test_dataset, batch_size=training_args.batch_size)
+
+    unlabeled_loader = DataLoader(unlabeled_dataset, batch_size=training_args.batch_size)
     unlabeled_loader = iter(unlabeled_loader)
 
     accelerator = Accelerator()
@@ -121,10 +106,11 @@ def main():
     metric = load_metric('accuracy')
     # progress_bar = tqdm(range(training_args.max_train_steps), disable=not accelerator.is_local_main_process)
     completed_steps = 0
-    CE_loss = torch.nn.CrossEntropyLoss(reduction="none")
-    KL_loss = torch.nn.KLDivLoss(reduction='batchmean')
+    CE_loss = torch.nn.CrossEntropyLoss(reduction="mean")
+    ## torch.nn.CrossEntropyLoss : LogSoftmax + NLL Loss
+    KL_loss = torch.nn.KLDivLoss(reduction="batchmean")
 
-
+    from IPython import embed; embed() ## 두 세번째 batch 부터 모델 인퍼런스가 안됨
     logging.info('\t*** Running training & eval ***')
     for epoch in range(training_args.num_train_epochs):
         model.train()
@@ -133,9 +119,9 @@ def main():
             # cross entropy
             text, _, label = batch
             outputs = model(text)
-            cross_entropy_loss = CE_loss(outputs[0], label)
-            supervised_loss = output.loss
-            supervised_loss /= training_args.gradient_accumulation_steps
+            cross_entropy_loss = CE_loss(outputs[0], label) / training_args.gradient_accumulation_steps
+            # supervised_loss = outputs.loss
+            cross_entropy_loss /= training_args.gradient_accumulation_steps
 
             # unsupervised learning
             # consistency loss
@@ -143,22 +129,21 @@ def main():
             output_aug = model(aug_text)[0]
             with torch.no_grad():
                 output_ori = model(ori_text)[0]
-            
-            consistency_loss = KL_loss(output_ori, output_aug)
+
+            consistency_loss = KL_loss(output_ori, output_aug) / training_args.gradient_accumulation_steps
 
             # final loss
-            loss = supervised_loss + consistency_loss
-            # mean? # scaling? # softmax?
-
+            loss = cross_entropy_loss + training_args.consistency_loss_weight * consistency_loss
+            
             accelerator.backward(loss)
-            if step % args.gradient_accumulation_steps == 0 or step == len(train_dataloader) - 1:
+            if step % training_args.gradient_accumulation_steps == 0 or step == len(train_dataloader) - 1:
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
                 # progress_bar.update(1)
                 completed_steps += 1
 
-            if completed_steps >= args.max_train_steps:
+            if completed_steps >= training_args.max_train_steps:
                 break
 
         model.eval()

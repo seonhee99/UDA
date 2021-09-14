@@ -19,6 +19,7 @@ class TrainingConfig():
         self.num_warmup_steps = 500
         self.gradient_accumulation_steps = 1
         self.max_train_steps=1000
+        self.consistency_loss_weight = 1
 
 
 class ModelConfig():
