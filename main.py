@@ -17,15 +17,15 @@ from transformers import (
     AdamW,
     AutoConfig,
     AutoModelForSequenceClassification,
-    AutoTokenizer,
-    DataCollatorWithPadding,
-    EvalPrediction,
-    HfArgumentParser,
-    PretrainedConfig,
-    Trainer,
-    TrainingArguments,
-    default_data_collator,
-    set_seed,
+    # AutoTokenizer,
+    # DataCollatorWithPadding,
+    # EvalPrediction,
+    # HfArgumentParser,
+    # PretrainedConfig,
+    # Trainer,
+    # TrainingArguments,
+    # default_data_collator,
+    # set_seed,
 )
 
 from utils import data_preprocess as dp
@@ -50,7 +50,7 @@ def main():
     else:
         raise NotImplementedError
 
-
+    logging.info(torch.cuda.is_available())
     model_args = ModelConfig()
     logging.info(f'\tMODELLING {model_args.model_name_or_path} model...')
 
@@ -67,9 +67,8 @@ def main():
 
     train_loader = DataLoader(train_dataset, batch_size=training_args.batch_size)
     test_loader  = DataLoader(test_dataset, batch_size=training_args.batch_size)
+    unlabeled_dataloader = DataLoader(unlabeled_dataset, batch_size=training_args.batch_size)
 
-    unlabeled_loader = DataLoader(unlabeled_dataset, batch_size=training_args.batch_size)
-    unlabeled_loader = iter(unlabeled_loader)
 
     accelerator = Accelerator()
     logger.info(accelerator.state)
@@ -113,31 +112,21 @@ def main():
     logging.info('\t*** Running training & eval ***')
     for epoch in range(training_args.num_train_epochs):
         model.train()
+        print(f'==== EPOCH {epoch} training ====')
+        loss = 0
+
+        # supervised learning
         for step, batch in enumerate(train_dataloader):
-            # supervised learning
-            # cross entropy
-            print(f'==== STEP {step} , batch sizeof {len(batch[0])} ====')
             text, _, label = batch
-
-            print(text, label)
+            # cross entropy
             outputs = model(text)
-            print(outputs)
-            cross_entropy_loss = CE_loss(outputs[0], label)
-            # supervised_loss = outputs.loss
-
-            # unsupervised learning
-            # consistency loss
-            ori_text, aug_text, _ = next(unlabeled_loader)
-            output_aug = model(aug_text)[0]
-            with torch.no_grad():
-                output_ori = model(ori_text)[0]
-
-            consistency_loss = KL_loss(output_ori, output_aug)
-
-            # final loss
-            loss = cross_entropy_loss + training_args.consistency_loss_weight * consistency_loss
-            loss /= training_args.gradient_accumulation_steps
-            
+            ## bert input을 아래와 같은 딕셔너리 형태로 짜고 한 번에 **batch 꼴로 넣어준다고 함
+            # {
+            #     "input_ids" : []
+            #     "attention_masks" : []
+            # }
+            cross_entropy_loss = CE_loss(outputs[0], label) 
+            loss = cross_entropy_loss / training_args.gradient_accumulation_steps
             accelerator.backward(loss)
             if step % training_args.gradient_accumulation_steps == 0 or step == len(train_dataloader) - 1:
                 optimizer.step()
@@ -146,11 +135,25 @@ def main():
                 # progress_bar.update(1)
                 completed_steps += 1
 
-            ## bert input을 아래와 같은 딕셔너리 형태로 짜고 한 번에 **batch 꼴로 넣어준다고 함
-            # {
-            #     "input_ids" : []
-            #     "attention_masks" : []
-            # }
+        for step, batch in enumerate(unlabeled_dataloader):
+            # unsupervised learning
+            # consistency loss
+            ori_text, aug_text, _ = batch
+            output_aug = model(aug_text)
+            with torch.no_grad():
+                output_ori = model(ori_text)
+
+            consistency_loss = KL_loss(output_ori[0], output_aug[0])
+            loss = training_args.consistency_loss_weight * consistency_loss / training_args.gradient_accumulation_steps
+            accelerator.backward(loss)
+                
+            if step % training_args.gradient_accumulation_steps == 0 or step == len(train_dataloader) - 1:
+                optimizer.step()
+                lr_scheduler.step()
+                optimizer.zero_grad()
+                # progress_bar.update(1)
+                completed_steps += 1
+
             if completed_steps >= training_args.max_train_steps:
                 break
 

@@ -3,6 +3,7 @@
 # data and repositories
 data/
 utils/__pycache__/
+utils/fastBPE/
 pretrained_models/
 
 # notes

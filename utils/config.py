@@ -1,7 +1,7 @@
 class Config():
     def __init__(self):
         self.data = 'uda'
-        self.uda_data_folder = 'data'
+        self.uda_data_folder = 'data/uda_data'
         self.imdb_data_folder = 'data/aclImdb/train' # train > pos | neg | unsup > {id:int}.txt
         self.data_id_path = '../uda/text/data/IMDB_raw/train_id_list.txt'
 
