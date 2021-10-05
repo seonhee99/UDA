@@ -96,6 +96,21 @@ class UDADataset(Dataset):
         -- INPUT
         labeled data : {'input_ids', 'input_mask', 'input_type_ids', 'label_ids'}
         unlabeled data : {'ori_input_ids', 'ori_input_mask', 'ori_input_type_ids', 'aug_input_ids', 'aug_input_mask', 'aug_input_type_ids'}
+
+        def forward(
+        self,
+        input_ids=None,
+        attention_mask=None,
+        token_type_ids=None,
+        position_ids=None,
+        head_mask=None,
+        inputs_embeds=None,
+        encoder_hidden_states=None,
+        encoder_attention_mask=None,
+        output_attentions=None,
+        output_hidden_states=None,
+        return_dict=None,
+    ):
         
         -- getitem
         return (original text, augmented text, label)
@@ -110,18 +125,23 @@ class UDADataset(Dataset):
         elif 'aug_input_ids' in data.keys():
             self.text = {k:v for k,v in data.items() if 'ori' in k} # data[ 'ori_input_ids' ] 
             self.aug  = {k:v for k,v in data.items() if 'aug' in k} # data[ 'aug_input_ids' ]
-            self.label = [0]*len(self.text)
-
+            self.label = [0]*len(self.aug['aug_input_ids'])
+            print('check unlabeled dataset - from idx 2!')
+            # from IPython import embed; embed()
         else:
             raise ValueError
 
+
+
     def __len__(self):
-        return len(self.text)
+        return len(self.label)
     
     def __getitem__(self, idx):
         text = { k:torch.tensor( ast.literal_eval(v[idx]) , dtype=torch.long) for k,v in self.text.items()}
         aug_text = { k:torch.tensor( ast.literal_eval(v[idx]) , dtype=torch.long) for k,v in self.aug.items()}
         # aug_text = torch.tensor( ast.literal_eval(self.aug[idx]) , dtype=torch.long)
-        label = torch.tensor( self.label[idx] , dtype=torch.long)
+        label = torch.tensor( self.label[idx] , dtype=torch.long )
+        # from IPython import embed; embed()
         return text, aug_text, label
+        ## 28996
     

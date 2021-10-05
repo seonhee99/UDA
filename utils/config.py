@@ -24,7 +24,7 @@ class TrainingConfig():
 
 class ModelConfig():
     def __init__(self):
-        self.model_name_or_path = 'bert-base-cased'
+        self.model_name_or_path = 'bert-base-uncased'
         self.config_name = None
         self.tokenizer_name = None
         self.cache_dir = None

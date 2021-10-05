@@ -58,7 +58,6 @@ def main():
     model = AutoModelForSequenceClassification.from_config(config)
 
 
-    ## TODO : training까지
     logger.info('\tTRAIN')
 
     train_dataset = dp.UDADataset(train)
@@ -68,7 +67,6 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=training_args.batch_size)
     test_loader  = DataLoader(test_dataset, batch_size=training_args.batch_size)
     unlabeled_dataloader = DataLoader(unlabeled_dataset, batch_size=training_args.batch_size)
-
 
     accelerator = Accelerator()
     logger.info(accelerator.state)
@@ -85,10 +83,11 @@ def main():
         },
     ]
     optimizer = AdamW(optimizer_grouped_parameters, lr=training_args.learning_rate)
-    model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
-        model, optimizer, train_loader, test_loader
-    )
-    num_update_steps_per_epoch = math.ceil(len(train_dataloader) / training_args.gradient_accumulation_steps)
+    # model, optimizer, train_loader, test_loader = accelerator.prepare(
+    #     model, optimizer, train_loader
+    # )
+    eval_dataloader = iter(test_loader)
+    num_update_steps_per_epoch = math.ceil(len(train_loader) / training_args.gradient_accumulation_steps)
     # (optional)
     if training_args.max_train_steps is None:
         training_args.max_train_steps = training_args.num_train_epochs * num_update_steps_per_epoch
@@ -108,7 +107,7 @@ def main():
     ## torch.nn.CrossEntropyLoss : LogSoftmax + NLL Loss
     KL_loss = torch.nn.KLDivLoss(reduction="batchmean")
 
-    from IPython import embed; embed() ## 두 세번째 batch 부터 모델 인퍼런스가 안됨
+    ## 두 세번째 batch 부터 모델 인퍼런스가 안됨
     logging.info('\t*** Running training & eval ***')
     for epoch in range(training_args.num_train_epochs):
         model.train()
@@ -116,19 +115,13 @@ def main():
         loss = 0
 
         # supervised learning
-        for step, batch in enumerate(train_dataloader):
+        for step, batch in enumerate(train_loader):
             text, _, label = batch
-            # cross entropy
-            outputs = model(text)
-            ## bert input을 아래와 같은 딕셔너리 형태로 짜고 한 번에 **batch 꼴로 넣어준다고 함
-            # {
-            #     "input_ids" : []
-            #     "attention_masks" : []
-            # }
-            cross_entropy_loss = CE_loss(outputs[0], label) 
+            outputs = model(input_ids=text['input_ids'], attention_mask=text['input_mask'], token_type_ids=text['input_type_ids'])
+            cross_entropy_loss = CE_loss(outputs[0], label)
             loss = cross_entropy_loss / training_args.gradient_accumulation_steps
             accelerator.backward(loss)
-            if step % training_args.gradient_accumulation_steps == 0 or step == len(train_dataloader) - 1:
+            if step % training_args.gradient_accumulation_steps == 0 or step == len(train_loader) - 1:
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
@@ -137,17 +130,16 @@ def main():
 
         for step, batch in enumerate(unlabeled_dataloader):
             # unsupervised learning
-            # consistency loss
             ori_text, aug_text, _ = batch
-            output_aug = model(aug_text)
+            output_aug = model(input_ids=aug_text['aug_input_ids'], attention_mask=aug_text['aug_input_mask'], token_type_ids=aug_text['aug_input_type_ids'])
             with torch.no_grad():
-                output_ori = model(ori_text)
-
+                output_ori = model(input_ids=ori_text['ori_input_ids'], attention_mask=ori_text['ori_input_mask'], token_type_ids=ori_text['ori_input_type_ids'])
+            
             consistency_loss = KL_loss(output_ori[0], output_aug[0])
             loss = training_args.consistency_loss_weight * consistency_loss / training_args.gradient_accumulation_steps
             accelerator.backward(loss)
                 
-            if step % training_args.gradient_accumulation_steps == 0 or step == len(train_dataloader) - 1:
+            if step % training_args.gradient_accumulation_steps == 0 or step == len(train_loader) - 1:
                 optimizer.step()
                 lr_scheduler.step()
                 optimizer.zero_grad()
@@ -157,9 +149,11 @@ def main():
             if completed_steps >= training_args.max_train_steps:
                 break
 
+        print('model.eval() begins')
         model.eval()
         for step, batch in enumerate(eval_dataloader):
-            outputs = model(**batch)
+            text, _, label = batch
+            outputs = model(input_ids=text['input_ids'], attention_mask=text['input_mask'], token_type_ids=text['input_type_ids'])
             predictions = outputs.logits.argmax(dim=-1) if not is_regression else outputs.logits.squeeze()
             metric.add_batch(
                 predictions=accelerator.gather(predictions),
