@@ -126,8 +126,6 @@ class UDADataset(Dataset):
             self.text = {k:v for k,v in data.items() if 'ori' in k} # data[ 'ori_input_ids' ] 
             self.aug  = {k:v for k,v in data.items() if 'aug' in k} # data[ 'aug_input_ids' ]
             self.label = [0]*len(self.aug['aug_input_ids'])
-            print('check unlabeled dataset - from idx 2!')
-            # from IPython import embed; embed()
         else:
             raise ValueError
 

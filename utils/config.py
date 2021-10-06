@@ -13,12 +13,12 @@ class TrainingConfig():
         self.batch_size = 8
         self.weight_decay = 0.1
         self.learning_rate = 0.1
-        self.num_train_steps=1000
+        self.num_train_steps=100
         self.num_train_epochs=10
         self.num_labels = 2
         self.num_warmup_steps = 500
         self.gradient_accumulation_steps = 1
-        self.max_train_steps=1000
+        self.max_train_steps=100
         self.consistency_loss_weight = 1
 
 

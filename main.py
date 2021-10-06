@@ -59,7 +59,7 @@ def main():
 
 
     logger.info('\tTRAIN')
-
+    # import pdb; pdb.set_trace()
     train_dataset = dp.UDADataset(train)
     test_dataset = dp.UDADataset(test)
     unlabeled_dataset = dp.UDADataset(unlabeled)
@@ -114,7 +114,6 @@ def main():
         print(f'==== EPOCH {epoch} training ====')
         loss = 0
 
-        # supervised learning
         for step, batch in enumerate(train_loader):
             text, _, label = batch
             outputs = model(input_ids=text['input_ids'], attention_mask=text['input_mask'], token_type_ids=text['input_type_ids'])
@@ -152,12 +151,13 @@ def main():
         print('model.eval() begins')
         model.eval()
         for step, batch in enumerate(eval_dataloader):
+            
             text, _, label = batch
             outputs = model(input_ids=text['input_ids'], attention_mask=text['input_mask'], token_type_ids=text['input_type_ids'])
-            predictions = outputs.logits.argmax(dim=-1) if not is_regression else outputs.logits.squeeze()
-            metric.add_batch(
+            predictions = outputs[0].argmax(dim=-1) # if not is_regression else outputs.logits.squeeze()
+            metric.add_batch( # int object is not iterable error
                 predictions=accelerator.gather(predictions),
-                references=accelerator.gather(batch["labels"]),
+                references=accelerator.gather(label),
             )
 
         eval_metric = metric.compute()
