@@ -64,9 +64,12 @@ def main():
     test_dataset = dp.UDADataset(test)
     unlabeled_dataset = dp.UDADataset(unlabeled)
 
+    train_len = math.ceil( len(train_dataset) / training_args.batch_size )
+    unlabeled_batch_size = math.ceil(len(unlabeled_dataset) / train_len)
+
     train_loader = DataLoader(train_dataset, batch_size=training_args.batch_size)
     test_loader  = DataLoader(test_dataset, batch_size=training_args.batch_size)
-    unlabeled_dataloader = DataLoader(unlabeled_dataset, batch_size=training_args.batch_size)
+    unlabeled_dataloader = DataLoader(unlabeled_dataset, batch_size=unlabeled_batch_size)
 
     accelerator = Accelerator()
     logger.info(accelerator.state)
@@ -109,17 +112,36 @@ def main():
 
     logging.info('\t*** Running training & eval ***')
 
+
     for epoch in range(training_args.num_train_epochs):
         
         model.train()
         print(f'==== EPOCH {epoch} training ====')
         loss = 0
+        unlabled_iter = iter(unlabeled_dataloader)
 
         for step, batch in enumerate(train_loader):
             text, _, label = batch
             outputs = model(input_ids=text['input_ids'], attention_mask=text['input_mask'], token_type_ids=text['input_type_ids'])
             cross_entropy_loss = CE_loss(outputs[0], label)
-            loss = cross_entropy_loss / training_args.gradient_accumulation_steps
+            supervised_loss = cross_entropy_loss / training_args.gradient_accumulation_steps
+
+            unlabeled_batch = next(unlabled_iter)
+            u_text, a_text, _ = unlabeled_batch
+            # from IPython import embed; embed()
+            a_output = model(input_ids=a_text['aug_input_ids'], attention_mask=a_text['aug_input_mask'], token_type_ids=a_text['aug_input_type_ids'])[0]
+            # a_output = model(a_text)[0]
+
+            model.eval()
+            with torch.no_grad():
+                u_output = model(input_ids=u_text['ori_input_ids'], attention_mask=u_text['ori_input_mask'], token_type_ids=u_text['ori_input_type_ids'])[0]
+                # u_output = model(u_text)[0]
+            model.train()
+
+            unsupervised_loss = KL_loss(u_output, a_output)
+
+            loss = (supervised_loss + unsupervised_loss * consistency_loss) / training_args.gradient_accumulation_steps
+
             accelerator.backward(loss)
             if step % training_args.gradient_accumulation_steps == 0 or step == len(train_loader) - 1:
                 optimizer.step()
@@ -128,24 +150,24 @@ def main():
                 # progress_bar.update(1)
                 completed_steps += 1
 
-        for step, batch in enumerate(unlabeled_dataloader):
-            # unsupervised learning
-            ori_text, aug_text, _ = batch
-            output_aug = model(input_ids=aug_text['aug_input_ids'], attention_mask=aug_text['aug_input_mask'], token_type_ids=aug_text['aug_input_type_ids'])
-            with torch.no_grad():
-                output_ori = model(input_ids=ori_text['ori_input_ids'], attention_mask=ori_text['ori_input_mask'], token_type_ids=ori_text['ori_input_type_ids'])
+        # for step, batch in enumerate(unlabeled_dataloader):
+        #     # unsupervised learning
+        #     ori_text, aug_text, _ = batch
+        #     output_aug = model(input_ids=aug_text['aug_input_ids'], attention_mask=aug_text['aug_input_mask'], token_type_ids=aug_text['aug_input_type_ids'])
+        #     with torch.no_grad():
+        #         output_ori = model(input_ids=ori_text['ori_input_ids'], attention_mask=ori_text['ori_input_mask'], token_type_ids=ori_text['ori_input_type_ids'])
             
-            consistency_loss = KL_loss(output_ori[0], output_aug[0])
-            loss = training_args.consistency_loss_weight * consistency_loss / training_args.gradient_accumulation_steps
-            accelerator.backward(loss)
-            #### loss 를 더해서 update해주어야 하진 않은지?
+        #     consistency_loss = KL_loss(output_ori[0], output_aug[0])
+        #     loss = training_args.consistency_loss_weight * consistency_loss / training_args.gradient_accumulation_steps
+        #     accelerator.backward(loss)
+        #     #### loss 를 더해서 update해주어야 하진 않은지?
                 
-            if step % training_args.gradient_accumulation_steps == 0 or step == len(train_loader) - 1:
-                optimizer.step()
-                lr_scheduler.step()
-                optimizer.zero_grad()
-                # progress_bar.update(1)
-                completed_steps += 1
+        #     if step % training_args.gradient_accumulation_steps == 0 or step == len(train_loader) - 1:
+        #         optimizer.step()
+        #         lr_scheduler.step()
+        #         optimizer.zero_grad()
+        #         # progress_bar.update(1)
+        #         completed_steps += 1
 
             if completed_steps >= training_args.max_train_steps:
                 break
@@ -153,7 +175,7 @@ def main():
         print('model.eval() begins')
         model.eval()
         
-        for step, batch in enumerate(eval_dataloader):
+        for step, batch in enumerate(test_loader):
             text, _, label = batch
             outputs = model(input_ids=text['input_ids'], attention_mask=text['input_mask'], token_type_ids=text['input_type_ids'])
             predictions = outputs[0].argmax(dim=-1) # if not is_regression else outputs.logits.squeeze()
