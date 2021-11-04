@@ -86,7 +86,7 @@ def main():
     # model, optimizer, train_loader, test_loader = accelerator.prepare(
     #     model, optimizer, train_loader
     # )
-    eval_dataloader = iter(test_loader)
+    # eval_dataloader = iter(test_loader) #### iter 왜 넣었지 ..? ###
     num_update_steps_per_epoch = math.ceil(len(train_loader) / training_args.gradient_accumulation_steps)
     # (optional)
     if training_args.max_train_steps is None:
@@ -107,9 +107,10 @@ def main():
     ## torch.nn.CrossEntropyLoss : LogSoftmax + NLL Loss
     KL_loss = torch.nn.KLDivLoss(reduction="batchmean")
 
-    ## 두 세번째 batch 부터 모델 인퍼런스가 안됨
     logging.info('\t*** Running training & eval ***')
+
     for epoch in range(training_args.num_train_epochs):
+        
         model.train()
         print(f'==== EPOCH {epoch} training ====')
         loss = 0
@@ -137,6 +138,7 @@ def main():
             consistency_loss = KL_loss(output_ori[0], output_aug[0])
             loss = training_args.consistency_loss_weight * consistency_loss / training_args.gradient_accumulation_steps
             accelerator.backward(loss)
+            #### loss 를 더해서 update해주어야 하진 않은지?
                 
             if step % training_args.gradient_accumulation_steps == 0 or step == len(train_loader) - 1:
                 optimizer.step()
@@ -150,8 +152,8 @@ def main():
 
         print('model.eval() begins')
         model.eval()
+        
         for step, batch in enumerate(eval_dataloader):
-            
             text, _, label = batch
             outputs = model(input_ids=text['input_ids'], attention_mask=text['input_mask'], token_type_ids=text['input_type_ids'])
             predictions = outputs[0].argmax(dim=-1) # if not is_regression else outputs.logits.squeeze()
@@ -160,7 +162,14 @@ def main():
                 references=accelerator.gather(label),
             )
 
-        eval_metric = metric.compute()
+        eval_metric = metric.compute() #### ERROR ####
+        '''TODO
+        1. test set & train set 줄여서 500개씩만 돌려보기
+        2. pdb
+        3. try : except :  m
+        --> eval이 iter 객체라 아마 한 에폭 끝나고 다음에 다시 for문 돌리니까 에러 날 것
+        --> iter객체로 만들어주는 부분을 주석처리 해놧으므로 아마 다시 돌리면 잘 돌아갈 것 같습니당
+        '''
         logger.info(f"epoch {epoch}: {eval_metric}")
 
 if __name__ == '__main__':
